@@ -122,8 +122,9 @@ save all modified buffers without asking."
 
 (defcustom magit-save-some-buffers-predicate
   'magit-save-buffers-predicate-tree-only
-  "Specifies a predicate function on \\[magit-save-some-buffers] to determine which
-   unsaved buffers should be prompted for saving."
+  "Specifies a predicate function `magit-save-some-buffers' to determine which
+   unsaved buffers should be prompted for saving when function
+  `magit-save-some-buffers' is called."
 
   :group 'magit
   :type '(radio (function-item magit-save-buffers-predicate-tree-only)
@@ -2792,7 +2793,8 @@ If PRED is t, then certain non-file buffers will also be considered.
 If PRED is a zero-argument function, it indicates for each buffer whether
 to consider it or not when called with that buffer current."
   (interactive)
-  (let ((predicate-function (or pred magit-save-some-buffers-predicate)))
+  (let ((predicate-function (or pred magit-save-some-buffers-predicate))
+        (invoking-file (buffer-file-name (current-buffer))))
     
     (if magit-save-some-buffers
         (save-some-buffers
@@ -2811,7 +2813,10 @@ to consider it or not when called with that buffer current."
   determined by the dir passed to `magit-status'."
   (let ((current-buf-dir
          (file-name-directory (buffer-file-name (current-buffer)))))
-    (let ((invoked-git-root-dir (magit-get-top-dir default-directory)))
+
+    (let ((invoked-git-root-dir
+           (magit-get-top-dir (file-name-directory invoking-file))))
+
       (let ((save-this-buffer
              (and
               invoked-git-root-dir
