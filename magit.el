@@ -2876,9 +2876,17 @@ must return a string which will represent the log line.")
              (match-string 1 suffix))
         'magit-log-head-label-patches))
 
+(defvar magit-log-remotes-color-hook nil)
+
+(defun magit-log-get-remotes-color (suffix)
+  (or
+   (run-hook-with-args-until-success
+    'magit-log-remotes-color-hook suffix)
+   (list suffix 'magit-log-head-label-remote)))
+
 (defvar magit-refs-namespaces
   '(("tags" . magit-log-head-label-tags)
-    ("remotes" . magit-log-head-label-remote)
+    ("remotes" magit-log-get-remotes-color)
     ("heads" . magit-log-head-label-local)
     ("patches" magit-log-get-patches-color)
     ("bisect" magit-log-get-bisect-state-color)))
@@ -2905,14 +2913,17 @@ must return a string which will represent the log line.")
   "The default log line generator."
   (let ((string-refs
          (when refs
-           (concat (mapconcat
-                    (lambda (r)
-                      (destructuring-bind (label face)
-                          (magit-ref-get-label-color r)
-                        (propertize label 'face face)))
-                    refs
-                    " ")
-                   " "))))
+           (let ((colored-labels
+                  (delete nil
+                          (mapcar (lambda (r)
+                                    (destructuring-bind (label face)
+                                        (magit-ref-get-label-color r)
+                                      (and label
+                                           (propertize label 'face face))))
+                                  refs))))
+             (concat
+              (mapconcat 'identity colored-labels " ")
+              " ")))))
 
     (concat
      (if sha1
@@ -3296,6 +3307,8 @@ PREPEND-REMOTE-NAME is non-nil."
 \\{magit-status-mode-map}"
   :group 'magit)
 
+(defvar magit-default-directory nil)
+
 (defun magit-save-some-buffers (&optional msg pred)
   "Save some buffers if variable `magit-save-some-buffers' is non-nil.
 If variable `magit-save-some-buffers' is set to 'dontask then
@@ -3311,8 +3324,8 @@ If PRED is t, then certain non-file buffers will also be considered.
 If PRED is a zero-argument function, it indicates for each buffer whether
 to consider it or not when called with that buffer current."
   (interactive)
-  (let ((predicate-function (or pred magit-save-some-buffers-predicate)))
-
+  (let ((predicate-function (or pred magit-save-some-buffers-predicate))
+        (magit-default-directory default-directory))
     (if magit-save-some-buffers
         (save-some-buffers
          (eq magit-save-some-buffers 'dontask)
@@ -3329,8 +3342,8 @@ to consider it or not when called with that buffer current."
   "Only prompt to save buffers which are within the current git project (as
   determined by the dir passed to `magit-status'."
   (and buffer-file-name
-       (eq (magit-get-top-dir dir)
-           (magit-get-top-dir (file-name-directory buffer-file-name)))))
+       (string= (magit-get-top-dir magit-default-directory)
+                (magit-get-top-dir (file-name-directory buffer-file-name)))))
 
 ;;;###autoload
 (defun magit-status (dir)
@@ -3872,15 +3885,18 @@ If there is no default remote, ask for one."
 	(magit-set merge-branch "branch" branch "merge"))
     (apply 'magit-run-git-async "pull" "-v" magit-custom-options)))
 
-(eval-when-compile (require 'pcomplete))
+(eval-when-compile (require 'eshell))
+
+(defun magit-parse-arguments (command)
+  (require 'eshell)
+  (with-temp-buffer
+    (insert command)
+    (mapcar 'eval (eshell-parse-arguments (point-min) (point-max)))))
 
 (defun magit-shell-command (command)
   "Perform arbitrary shell COMMAND."
   (interactive "sCommand: ")
-  (require 'pcomplete)
-  (let ((args (car (with-temp-buffer
-		     (insert command)
-		     (pcomplete-parse-buffer-arguments))))
+  (let ((args (magit-parse-arguments command))
 	(magit-process-popup-time 0))
     (magit-run* args nil nil nil t)))
 
@@ -3891,9 +3907,7 @@ Similar to `magit-shell-command', but involves slightly less
 typing and automatically refreshes the status buffer."
   (interactive "sRun git like this: ")
   (require 'pcomplete)
-  (let ((args (car (with-temp-buffer
-		     (insert command)
-		     (pcomplete-parse-buffer-arguments))))
+  (let ((args (magit-parse-arguments command))
 	(magit-process-popup-time 0))
     (magit-with-refresh
       (magit-run* (append (cons magit-git-executable
@@ -4982,10 +4996,12 @@ Return values:
   t		   the server seems to be running.
   something else   we cannot determine whether it's running without using
 		   commands which may have to wait for a long time."
+  (require 'server)
   (if (functionp 'server-running-p)
       (server-running-p)
     (condition-case nil
-	(if server-use-tcp
+	(if (and (boundp 'server-use-tcp)
+                 server-use-tcp)
 	    (with-temp-buffer
 	      (insert-file-contents-literally (expand-file-name server-name server-auth-dir))
 	      (or (and (looking-at "127\\.0\\.0\\.1:[0-9]+ \\([0-9]+\\)")
@@ -5053,8 +5069,8 @@ With prefix force the removal even it it hasn't been merged."
                     (magit-remove-remote (magit--branch-name-from-section branch-section)))))
     (if (and (magit--is-branch-section-remote branch-section)
              (yes-or-no-p "Remove branch in remote repository as well? "))
-        (magit-remove-branch-in-remote-repo (magit--branch-name-from-section branch-section)))
-    (apply 'magit-run-git (remq nil args))))
+        (magit-remove-branch-in-remote-repo (magit--branch-name-from-section branch-section))
+    (apply 'magit-run-git (remq nil args)))))
 
 (defun magit--remotes ()
   "Return a list of names for known remotes."
